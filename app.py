@@ -136,17 +136,13 @@ def chat():
         if not user_message: return jsonify({})
         if not session_id: session_id = f"test-session-{uuid.uuid4()}"
         
-        print(f"✅ Received message: '{user_message}'. Processing for session: {session_id}")
-
-        # --- LOCKING LOGIC ---
-        # Get or create a lock for this specific session
+        print(f"✅ Received message: '{user_message}'.")
+        
         lock = SESSION_LOCKS.setdefault(session_id, threading.Lock())
 
-        # Try to acquire the lock WITHOUT waiting.
         if not lock.acquire(blocking=False):
-            # If the lock is already held, ignore this new request to prevent spam.
-            print(f"🔒 Request for session {session_id} ignored: another process is already running.")
-            return jsonify({"status": "request_ignored_already_processing"}), 200
+            print(f"🔒 Request for session {session_id} ignored: already processing.")
+            return jsonify({}), 200 # Return empty OK to ignore
         
         print(f"🔐 Lock acquired for session: {session_id}")
         
@@ -158,17 +154,17 @@ def chat():
                 agent_response = run_graph_and_get_response(user_message, session_id)
                 return jsonify({"response": agent_response}), 200
             finally:
-                # CRUCIAL: Release the lock in sync mode too
                 lock.release()
                 print(f"🔓 Lock released for session: {session_id}")
         else: # async mode
             print("   - Running in ASYNC mode.")
             thread = threading.Thread(
                 target=process_in_background, 
-                args=(user_message, session_id, lock) # Pass the lock to the thread
+                args=(user_message, session_id, lock)
             )
             thread.start()
-            return jsonify({"status": "processing_in_background"}), 200
+            # Return a completely empty 200 OK for the async handshake.
+            return jsonify({}), 200
 
     except Exception as e:
         print(f"An error occurred in the chat endpoint: {e}")
