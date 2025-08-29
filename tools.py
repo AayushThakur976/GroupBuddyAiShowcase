@@ -43,6 +43,10 @@ class ToPacking(BaseModel):
     """Transfers work to a specialist who gives packing advice for a trip."""
     user_query: str = Field(description="The user's original question about what to pack.")
 
+class ToWeather(BaseModel):
+    """Transfers work to a specialist for questions about the weather for a trip."""
+    user_query: str = Field(description="The user's original question about the weather.")
+
 class CreatePoll(BaseModel):
     """Use this to create a poll in the group chat."""
     question: str = Field(description="The main question for the poll.")
@@ -60,17 +64,21 @@ class CompleteOrEscalate(BaseModel):
 # --- Tool Implementations ---
 def generate_itinerary_implementation(destination_or_description: Optional[str] = None, duration_days: Optional[int] = None, budget_per_person: Optional[int] = None, num_travelers: Optional[int] = None, interests: Optional[list] = None):
     """Generates a travel itinerary, making creative assumptions for any missing details."""
-    prompt = f"""You are a world-class travel agent based in Delhi, India. A user wants a trip plan.
+    # THIS PROMPT HAS BEEN HARDENED TO PREVENT NON-INDIAN RESPONSES
+    prompt = f"""You are a world-class travel agent **based in Delhi, India, specializing in trips originating from North India.** A user, who is also in India, wants a trip plan.
+
+    **CRITICAL CONTEXT: ALL suggestions MUST be in INDIA and easily accessible from Delhi for a weekend trip.** Do not suggest international locations under any circumstances.
+
     Their core request is: **'{destination_or_description or "a popular weekend getaway from Delhi"}'**.
 
-    Your task is to interpret this request.
-    - If it's a specific place, plan for it.
-    - If it's a description (like 'a cloudy place'), you MUST CHOOSE the single best-fit destination near Delhi and then create the plan for that suggested place.
+    Your task is to interpret this request with the India-only context in mind.
+    - If it's a specific Indian place, plan for it.
+    - If it's a description (like 'a cloudy place'), you MUST CHOOSE the single best-fit destination **near Delhi (e.g., in Himachal Pradesh, Uttarakhand)** and then create the full day-by-day plan for that chosen place. You MUST NOT just list options; you must create the complete itinerary.
 
     Create a complete, day-by-day itinerary using the following details. Make plausible assumptions for any missing information.
     - Number of Travelers: {num_travelers or 2}
     - Duration: {duration_days or 2} days
-    - Budget per Person: Approximately {budget_per_person or 2500}
+    - Budget per Person: Approximately INR {budget_per_person or 2500}
     - Key Interests: {', '.join(interests) if interests else "a general mix of popular activities"}
 
     Present the chosen destination and the full itinerary in a beautiful markdown format.
@@ -111,3 +119,7 @@ def to_accommodation(user_query: str) -> str:
 def to_packing(user_query: str) -> str:
     """Delegates the conversation to the packing specialist."""
     return f"Delegating to packing specialist with query: {user_query}"
+
+def to_weather(user_query: str) -> str:
+    """Delegates the conversation to the weather specialist."""
+    return f"Delegating to weather specialist with query: {user_query}"

@@ -12,11 +12,12 @@ from langchain_core.runnables import Runnable, RunnableConfig
 
 from tools import (
     GenerateItinerary,
-    ToPlacePromoter, ToPlaceComparator, ToTransportation, ToAccommodation, ToPacking, CompleteOrEscalate,
+    ToPlacePromoter, ToPlaceComparator, ToTransportation, ToAccommodation, ToPacking, ToWeather,
+    CompleteOrEscalate,
     CreatePoll, FlagAsIrrelevant, SuggestViralChallenge,
     generate_itinerary_implementation,
     create_poll_in_group, to_place_promoter, to_place_comparator, to_transportation,
-    to_accommodation, to_packing, flag_as_irrelevant,
+    to_accommodation, to_packing, to_weather, flag_as_irrelevant,
     suggest_viral_challenge_implementation,
     set_llm_for_tools
 )
@@ -24,7 +25,7 @@ from prompts import (
     PRIMARY_ASSISTANT_PROMPT, PLAN_PRESENTER_PROMPT,
     FINAL_RESPONSE_PROMPT,
     PLACE_PROMOTER_PROMPT, PLACE_COMPARATOR_PROMPT,
-    TRANSPORTATION_PROMPT, ACCOMMODATION_PROMPT, PACKING_PROMPT
+    TRANSPORTATION_PROMPT, ACCOMMODATION_PROMPT, PACKING_PROMPT, WEATHER_PROMPT
 )
 
 # --- LLM Configuration ---
@@ -47,7 +48,7 @@ def update_dialog_stack(left: List[str], right: Optional[str]) -> List[str]:
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     dialog_state: Annotated[
-        List[Literal["place_promoter", "place_comparator", "transportation", "accommodation", "packing"]],
+        List[Literal["place_promoter", "place_comparator", "transportation", "accommodation", "packing", "weather"]],
         update_dialog_stack,
     ]
 
@@ -65,7 +66,7 @@ final_responder = AssistantNode(FINAL_RESPONSE_PROMPT | llm)
 primary_assistant_tools_list = [
     GenerateItinerary,
     SuggestViralChallenge,
-    ToPlacePromoter, ToPlaceComparator, ToTransportation, ToAccommodation, ToPacking,
+    ToPlacePromoter, ToPlaceComparator, ToTransportation, ToAccommodation, ToPacking, ToWeather,
     CreatePoll, FlagAsIrrelevant
 ]
 primary_assistant = AssistantNode(PRIMARY_ASSISTANT_PROMPT | llm.bind_tools(primary_assistant_tools_list))
@@ -74,11 +75,8 @@ primary_tool_node = ToolNode([
     generate_itinerary_implementation,
     suggest_viral_challenge_implementation,
     create_poll_in_group,
-    to_place_promoter,
-    to_place_comparator,
-    to_transportation,
-    to_accommodation,
-    to_packing,
+    to_place_promoter, to_place_comparator, to_transportation,
+    to_accommodation, to_packing, to_weather,
     flag_as_irrelevant
 ])
 
@@ -98,27 +96,25 @@ place_comparator_assistant = AssistantNode(PLACE_COMPARATOR_PROMPT | llm.bind_to
 transportation_assistant = AssistantNode(TRANSPORTATION_PROMPT | llm.bind_tools(specialist_assistant_tools))
 accommodation_assistant = AssistantNode(ACCOMMODATION_PROMPT | llm.bind_tools(specialist_assistant_tools))
 packing_assistant = AssistantNode(PACKING_PROMPT | llm.bind_tools(specialist_assistant_tools))
+weather_assistant = AssistantNode(WEATHER_PROMPT | llm.bind_tools(specialist_assistant_tools))
+
 
 # --- Graph Routing Functions ---
 def route_to_specialist(state: State) -> Union[str, Any]:
     last_message = state["messages"][-1]
     if not isinstance(last_message, ToolMessage):
         return END
-    if last_message.name == GenerateItinerary.__name__:
-        return "plan_presenter"
-    if last_message.name == SuggestViralChallenge.__name__:
-        return "primary_assistant"
-    if last_message.name == CreatePoll.__name__:
-        return "final_responder"
-    if last_message.name == FlagAsIrrelevant.__name__:
-        return "chitchat_assistant"
+    if last_message.name == GenerateItinerary.__name__: return "plan_presenter"
+    if last_message.name == SuggestViralChallenge.__name__: return "primary_assistant"
+    if last_message.name == CreatePoll.__name__: return "final_responder"
+    if last_message.name == FlagAsIrrelevant.__name__: return "chitchat_assistant"
     if last_message.name == ToPlacePromoter.__name__: return "enter_place_promoter"
     if last_message.name == ToPlaceComparator.__name__: return "enter_place_comparator"
     if last_message.name == ToTransportation.__name__: return "enter_transportation"
     if last_message.name == ToAccommodation.__name__: return "enter_accommodation"
     if last_message.name == ToPacking.__name__: return "enter_packing"
-    if last_message.name == CompleteOrEscalate.__name__:
-        return "pop_dialog_state"
+    if last_message.name == ToWeather.__name__: return "enter_weather"
+    if last_message.name == CompleteOrEscalate.__name__: return "pop_dialog_state"
     return "primary_assistant"
 
 def route_from_primary(state: State) -> Union[Literal["primary_tools"], Any]:
@@ -150,18 +146,20 @@ builder.add_node("place_comparator", place_comparator_assistant)
 builder.add_node("transportation", transportation_assistant)
 builder.add_node("accommodation", accommodation_assistant)
 builder.add_node("packing", packing_assistant)
+builder.add_node("weather", weather_assistant)
 builder.add_node("enter_place_promoter", lambda s: {"dialog_state": "place_promoter"})
 builder.add_node("enter_place_comparator", lambda s: {"dialog_state": "place_comparator"})
 builder.add_node("enter_transportation", lambda s: {"dialog_state": "transportation"})
 builder.add_node("enter_accommodation", lambda s: {"dialog_state": "accommodation"})
 builder.add_node("enter_packing", lambda s: {"dialog_state": "packing"})
+builder.add_node("enter_weather", lambda s: {"dialog_state": "weather"})
 builder.add_node("pop_dialog_state", lambda s: {"dialog_state": "pop"})
 
 # --- Graph Flow ---
 builder.set_conditional_entry_point(get_active_specialist, {
     "primary_assistant": "primary_assistant", "place_promoter": "place_promoter",
     "place_comparator": "place_comparator", "transportation": "transportation",
-    "accommodation": "accommodation", "packing": "packing",
+    "accommodation": "accommodation", "packing": "packing", "weather": "weather",
 })
 builder.add_conditional_edges("primary_assistant", route_from_primary, {"primary_tools": "primary_tools", END: END})
 builder.add_conditional_edges("primary_tools", route_to_specialist, {
@@ -169,14 +167,21 @@ builder.add_conditional_edges("primary_tools", route_to_specialist, {
     "chitchat_assistant": "chitchat_assistant", "enter_place_promoter": "enter_place_promoter",
     "enter_place_comparator": "enter_place_comparator", "enter_transportation": "enter_transportation",
     "enter_accommodation": "enter_accommodation", "enter_packing": "enter_packing",
-    "primary_assistant": "primary_assistant", END: END
+    "enter_weather": "enter_weather", "primary_assistant": "primary_assistant",
+    END: END
 })
 builder.add_edge("plan_presenter", END)
 builder.add_edge("final_responder", END)
 builder.add_edge("chitchat_assistant", END)
-for specialist in ["place_promoter", "place_comparator", "transportation", "accommodation", "packing"]:
+
+all_specialists = [
+    "place_promoter", "place_comparator", "transportation",
+    "accommodation", "packing", "weather"
+]
+for specialist in all_specialists:
     builder.add_edge(f"enter_{specialist}", specialist)
     builder.add_conditional_edges(specialist, route_specialist_assistant, {"specialist_tools": "specialist_tools", END: END})
+
 builder.add_edge("specialist_tools", "pop_dialog_state")
 builder.add_edge("pop_dialog_state", "primary_assistant")
 
@@ -184,4 +189,4 @@ builder.add_edge("pop_dialog_state", "primary_assistant")
 memory = MemorySaver()
 travel_agent_graph = builder.compile(checkpointer=memory)
 
-print("✅ Final, robust Travel Agent graph with Presenter node compiled!")
+print("✅ Final, robust Travel Agent graph with all specialists compiled!")
