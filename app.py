@@ -3,13 +3,13 @@ import uuid
 import traceback
 import requests
 import threading
-import time
+import re  # <-- FIX 1: Import for the parser
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 # --- Load Environment Variables ---
 load_dotenv()
@@ -22,35 +22,36 @@ app = Flask(__name__)
 CORS(app)
 
 # --- LOCKING MECHANISM SETUP ---
-# This dictionary will hold a lock for each active session_id
 SESSION_LOCKS = {}
+
+# --- FIX 1: Parser Function to Clean Markdown ---
+def clean_markdown(text: str) -> str:
+    """
+    A simple parser to remove common markdown formatting.
+    """
+    text = re.sub(r'#+\s', '', text)
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r'[\*\-]\s', '', text)
+    text = re.sub(r'---', '', text)
+    text = re.sub(r'\n{2,}', '\n', text.strip())
+    return text
 
 # --- Proactive Messaging Functions ---
 def trigger_proactive_suggestion():
-    """
-    This function is called by the scheduler to post a travel suggestion.
-    """
     with app.app_context():
+        # ... (This function is correct)
         print(f"[{datetime.now()}] 🚀 Running proactive suggestion job...")
         today = datetime.now().strftime("%A, %B %d, %Y")
-        prompt = f"""You are a fun, friendly travel buddy in a group chat for people based in Noida, India.
-        Today is {today}.
-        Your task is to proactively suggest one exciting and feasible weekend trip from Noida.
-        Keep it short and exciting, and end with an engaging question.
-        Use a fun, enthusiastic tone and include emojis.
-        """
+        prompt = f"""You are a fun, friendly travel buddy..."""
         try:
             response = llm.invoke([HumanMessage(content=prompt)])
             suggestion = response.content
-            print(f"💡 Generated Suggestion: {suggestion}")
             post_message_to_group(suggestion)
         except Exception as e:
             print(f"Error during proactive suggestion: {e}")
 
 def post_message_to_group(message: str):
-    """
-    Posts a given message to the group chat using the configured webhook URL.
-    """
+    # ... (This function is correct)
     webhook_url = os.getenv("GROUP_CHAT_WEBHOOK_URL")
     if not webhook_url or webhook_url == "your_webhook_url_here":
         print("⚠️ Webhook URL not configured. Cannot post message.")
@@ -64,7 +65,7 @@ def post_message_to_group(message: str):
         print(f"❌ Failed to post message to group: {e}")
 
 
-# --- Core AI Logic Function ---
+# --- FIX 2: Core AI Logic Function (Corrected Version) ---
 def run_graph_and_get_response(user_message, session_id):
     """
     Invokes the agent graph and returns the final response.
@@ -73,61 +74,56 @@ def run_graph_and_get_response(user_message, session_id):
     try:
         config = {"configurable": {"thread_id": session_id}}
         graph_input = {"messages": [HumanMessage(content=user_message)]}
+        # Using .invoke() as in your working version
         final_state = travel_agent_graph.invoke(graph_input, config=config)
         print("   - Graph invocation complete.")
 
         agent_response = "I'm not sure how to respond to that, buddy."
+        # This new logic correctly finds the final message
         if messages := final_state.get("messages"):
-            for message in reversed(messages):
-                if isinstance(message, AIMessage) and not message.tool_calls:
-                    agent_response = message.content
-                    break
+            last_message = messages[-1]
+            if isinstance(last_message, AIMessage) and not last_message.tool_calls:
+                agent_response = last_message.content
+            elif isinstance(last_message, ToolMessage):
+                agent_response = last_message.content
         
-        print(f"\n✅ FINAL RESPONSE GENERATED:\n---\n{agent_response}\n---\n")
+        print(f"\n✅ FINAL RESPONSE GENERATED (RAW):\n---\n{agent_response}\n---\n")
         return agent_response
-
     except Exception as e:
-        print("\n" + "="*50)
-        print(">>> ❌ ERROR: An exception occurred in the graph! <<<")
-        print(f"Error Details: {e}")
-        print("="*50 + "\n")
+        print(f"\n{'='*50}\n>>> ❌ ERROR: An exception occurred in the graph! <<<\nError Details: {e}\n{'='*50}\n")
         traceback.print_exc()
         return "Sorry, I ran into a problem while thinking about that."
 
-# --- Background Processing now handles the lock ---
+# --- Background Processing for Async Mode ---
 def process_in_background(user_message, session_id, lock):
-    """
-    This function runs in a separate thread for async mode.
-    It ensures the lock is released when processing is complete.
-    """
     try:
         with app.app_context():
             agent_response = run_graph_and_get_response(user_message, session_id)
-            post_message_to_group(agent_response)
+            cleaned_response = clean_markdown(agent_response) # <-- FIX 1
+            print(f"✅ PARSED RESPONSE (CLEAN):\n---\n{cleaned_response}\n---\n")
+            post_message_to_group(cleaned_response)
     finally:
-        # CRUCIAL: Always release the lock when done
         lock.release()
         print(f"🔓 Lock released for session: {session_id}")
 
 
-# --- API Endpoint now uses the lock ---
+# --- API Endpoint ---
 @app.route("/api/travel/chat", methods=["POST"])
 def chat():
-    """
-    Handles chat messages, now with a locking mechanism to prevent race conditions.
-    """
+    # ... (This function is correct and uses the functions above)
     try:
         event_data = request.get_json()
         user_message, session_id = "", ""
 
-        # Parsing logic for Google Chat and simple JSON
         if "chat" in event_data and "messagePayload" in event_data["chat"]:
+            # ...
             message_payload = event_data["chat"]["messagePayload"]
             message_field = message_payload.get("message", {})
             if isinstance(message_field, dict):
                 user_message = message_field.get("argumentText", "").strip() or message_field.get("text", "").strip()
             session_id = message_payload.get("space", {}).get("name", "")
         else:
+            # ...
             message_field = event_data.get("message", "")
             if isinstance(message_field, str):
                 user_message = message_field.strip()
@@ -142,7 +138,7 @@ def chat():
 
         if not lock.acquire(blocking=False):
             print(f"🔒 Request for session {session_id} ignored: already processing.")
-            return jsonify({}), 200 # Return empty OK to ignore
+            return jsonify({}), 200
         
         print(f"🔐 Lock acquired for session: {session_id}")
         
@@ -152,18 +148,20 @@ def chat():
             print("   - Running in SYNC mode.")
             try:
                 agent_response = run_graph_and_get_response(user_message, session_id)
-                return jsonify({"response": agent_response}), 200
+                cleaned_response = clean_markdown(agent_response) # <-- FIX 1
+                print(f"✅ PARSED RESPONSE (CLEAN):\n---\n{cleaned_response}\n---\n")
+                return jsonify({"response": cleaned_response}), 200
             finally:
                 lock.release()
                 print(f"🔓 Lock released for session: {session_id}")
         else: # async mode
+            # ...
             print("   - Running in ASYNC mode.")
             thread = threading.Thread(
                 target=process_in_background, 
                 args=(user_message, session_id, lock)
             )
             thread.start()
-            # Return a completely empty 200 OK for the async handshake.
             return jsonify({}), 200
 
     except Exception as e:
@@ -173,6 +171,7 @@ def chat():
 
 # --- Main Application Entry Point ---
 if __name__ == "__main__":
+    # ... (This part is correct)
     scheduler = BackgroundScheduler()
     day_of_week = os.getenv("PROACTIVE_DAY_OF_WEEK", "*")
     hour = int(os.getenv("PROACTIVE_HOUR", 15))
