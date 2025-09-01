@@ -82,21 +82,24 @@ def RequestOriginLocation(question: str) -> str:
     return "Sounds like a fun trip! To give you the best suggestions, where will you be traveling from?"
 
 def get_travel_links(origin: str, destination: str) -> str:
-    """Builds and returns formatted travel links with pre-filled, corrected data."""
+    """Builds and returns formatted travel links."""
     origin_formatted = origin.title()
     destination_formatted = destination.title()
     travel_date = (datetime.now() + timedelta(days=1)).strftime("%d-%b-%Y")
-    redbus_url = (
-        f"https://www.redbus.in/search?fromCityName={origin_formatted}"
-        f"&toCityName={destination_formatted}&doj={travel_date}"
-    )
+    
+    # --- MODIFIED LINE ---
+    # Changed from a pre-filled f-string to a plain URL.
+    redbus_url = "https://www.redbus.in/"
+    
     irctc_url = "https://www.irctc.co.in/nget/train-search"
+    
+    # --- MODIFIED RETURN TEXT ---
+    # Changed "pre-filled links" to "helpful links".
     return (
-        f"I've created some pre-filled links for your trip from {origin} to {destination}:\n\n"
+        f"Here are some helpful links for your trip from {origin} to {destination}:\n\n"
         f"🚌 For Buses: [Search for buses on Redbus]({redbus_url})\n\n"
         f"🚆 For Trains: [Search for trains on the IRCTC Website]({irctc_url})"
     )
-
 def generate_itinerary_implementation(destination_or_description: Optional[str] = None, origin: Optional[str] = None, duration_days: Optional[int] = None, budget_per_person: Optional[int] = None, num_travelers: Optional[int] = None, interests: Optional[list] = None):
     """Generates a travel itinerary, making creative assumptions for any missing details."""
     start_location = origin or "Delhi"

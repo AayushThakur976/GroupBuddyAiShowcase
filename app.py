@@ -50,6 +50,15 @@ def trigger_proactive_suggestion():
         except Exception as e:
             print(f"Error during proactive suggestion: {e}")
 
+def clean_final_output(raw_text: str) -> str:
+    """
+    Removes the JSON tool call from the end of the AI's raw output.
+    """
+    # Find the last occurrence of a JSON-like structure {} and remove it.
+    # This regex is robust enough to handle multi-line JSON.
+    cleaned_text = re.sub(r'\s*{\s*".*?":\s*".*?"\s*}\s*$', '', raw_text, flags=re.DOTALL)
+    return cleaned_text.strip()
+
 def post_message_to_group(message: str):
     # ... (This function is correct)
     webhook_url = os.getenv("GROUP_CHAT_WEBHOOK_URL")
@@ -88,6 +97,7 @@ def run_graph_and_get_response(user_message, session_id):
                 agent_response = last_message.content
         
         print(f"\n✅ FINAL RESPONSE GENERATED (RAW):\n---\n{agent_response}\n---\n")
+        agent_response=clean_final_output(agent_response)
         return agent_response
     except Exception as e:
         print(f"\n{'='*50}\n>>> ❌ ERROR: An exception occurred in the graph! <<<\nError Details: {e}\n{'='*50}\n")
