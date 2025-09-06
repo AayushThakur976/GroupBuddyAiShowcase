@@ -97,7 +97,7 @@ def get_travel_links(origin: str, destination: str) -> str:
     # Changed "pre-filled links" to "helpful links".
     return (
         f"Here are some helpful links for your trip from {origin} to {destination}:\n\n"
-        f"🚌 For Buses: check redbus for buses {redbus_url} \n\n"
+        f"🚌 For Buses: [Search for buses on Redbus]({redbus_url})\n\n"
         f"🚆 For Trains: [Search for trains on the IRCTC Website]({irctc_url})"
     )
 def generate_itinerary_implementation(destination_or_description: Optional[str] = None, origin: Optional[str] = None, duration_days: Optional[int] = None, budget_per_person: Optional[int] = None, num_travelers: Optional[int] = None, interests: Optional[list] = None):
